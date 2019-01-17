@@ -18,7 +18,8 @@
 #include "camera_index.h"
 #include "Arduino.h"
 #include "ASC16.h"
-int pp[9]; 
+int pp[9];
+uint8_t  sent_pp[9];
 char percentage[9][9];
 typedef struct {
         size_t size; //number of values used for filtering
@@ -42,57 +43,61 @@ static ra_filter_t ra_filter;
 httpd_handle_t stream_httpd = NULL;
 httpd_handle_t camera_httpd = NULL;
 
+bool ColorComp(uint16_t pixel_color,uint16_t template_color,uint16_t threshold){
+   int ar,ag,ab;
+   int br,bg,bb;  
+   
+   ar = ((pixel_color>>11)&0xff)<<3;
+   ag = ((pixel_color>>5)&0x3f)<<2;
+   ab = (pixel_color&0x1f)<<2;
+   
+   br = ((template_color>>11)&0xff)<<3;
+   bg = ((template_color>>5)&0x3f)<<2;
+   bb = (template_color&0x1f)<<2;
+
+   int absR=ar-br;
+   int absG=ag-bg;
+   int absB=ab-bb;
+
+   uint16_t temp = sqrt(absR*absR+absG*absG+absB*absB);
+   //Serial.printf("temp = %d\n",temp);
+   if(temp < threshold)
+     return true;
+   return false;
+}
 void writeHzkAsc(camera_fb_t * fb,uint16_t cursor_x,uint16_t cursor_y,const char *c) {
 
     uint8_t * pAscCharMatrix = (uint8_t *)&ASC16[0];
+    
     uint32_t offset;
-
     uint8_t mask;
-
     uint16_t posX = cursor_x, posY = cursor_y;
-
     uint8_t charMatrix[16];
 
     uint8_t *pCharMatrix;
 
     int n = 0;
     while(*c != '\0'){
-    
-    offset = (uint32_t)(*c) * 16;
-
-    pCharMatrix = pAscCharMatrix + offset;
-
-
-    for (uint8_t row = 0; row < 16; row++) {
-
-      mask = 0x80;
-
-      posX = cursor_x + n*16;
-
-      for (uint8_t col = 0; col < 8; col++) {
-
-        if ((*pCharMatrix & mask) != 0) {
-
-          fb->buf[posY * fb->width * 2 + posX] = 0;
-          fb->buf[posY * fb->width * 2 + posX + 1] = 0;
-
+      offset = (uint32_t)(*c) * 16;
+      pCharMatrix = pAscCharMatrix + offset;
+      for (uint8_t row = 0; row < 16; row++) {
+        mask = 0x80;
+        posX = cursor_x + n*16;
+        for (uint8_t col = 0; col < 8; col++) {
+          if ((*pCharMatrix & mask) != 0) {
+            fb->buf[posY * fb->width * 2 + posX] = 0;
+            fb->buf[posY * fb->width * 2 + posX + 1] = 0;
+          }
+          posX += 2;
+          mask >>= 1;
         }
-
-        posX += 2;
-
-        mask >>= 1;
-
+        posY += 1;
+        pCharMatrix++;
       }
-
-      posY += 1;
-
-      pCharMatrix++;
-
-    }
-    posX += 16;
-    posY = cursor_y;
-    c += 1;
-    n++;
+      posX += 16;
+      posY = cursor_y;
+      c += 1;
+      n++;
     }
 
 }
@@ -158,33 +163,44 @@ static esp_err_t capture_handler(httpd_req_t *req){
         res = httpd_resp_send(req, (const char *)fb->buf, fb->len);
     } else {
         Serial.printf("fb->format != PIXFORMAT_JPEG\n");
-        Serial.printf("fb->len = %d\n", fb->len);
-        Serial.printf("fb->width = %d\n", fb->width);
-        Serial.printf("fb->height = %d\n", fb->height);
-        Serial.printf("fb->format = %d\n", fb->format);
+        Serial.printf("fb->len     = %d\n", fb->len);
+        Serial.printf("fb->width   = %d\n", fb->width);
+        Serial.printf("fb->height  = %d\n", fb->height);
+        Serial.printf("fb->format  = %d\n", fb->format);
         int h = 0; 
         int l = 0;
         int quadrant = 0;
-        for(int i = 0; i < 9; i++)
-        pp[i] = 0;
+        for(int i = 0; i < 9; i++){
+          //！%
+          pp[i] = 0;
+        }
         uint16_t color = 0;
+        int temp_avr = 0;
         for(int i = 0; i < fb->len/2; i++){
           //Serial.printf("%d = %x\n",i, fb->buf[2*i]<<8|fb->buf[2*i+1]);
           //Serial.printf("%d = %x\n",i, fb->buf[2*i]<<8|fb->buf[2*i+1]);
           color = fb->buf[2*i]<<8|fb->buf[2*i+1];
-          if(color >= 48000){
-            //if(i/fb->width)
+          #if 0
              h = i/fb->width;
              l = i%fb->width;
              quadrant = h/40 * 3 + l/53;
              if(quadrant > 8)quadrant = 8;
-             if(quadrant == 4){
-              //Serial.printf("%d\n",fb->buf[2*i]<<8|fb->buf[2*i+1]);
-             }
-             //Serial.printf("%d\n",quadrant);
+             //if(quadrant == 4){
+              Serial.printf("%d\n",fb->buf[2*i]<<8|fb->buf[2*i+1]);
+              //temp_avr += color;
+             //}
              pp[quadrant]++;
-          }
+        #else
+         if(ColorComp(color,41261,80)){
+           h = i/fb->width;
+           l = i%fb->width;
+           quadrant = h/40 * 3 + l/53;
+           if(quadrant > 8)quadrant = 8;
+           pp[quadrant]++;
+         }
+         #endif
         }
+        //Serial.printf("%d\n",temp_avr/(fb->len/18));
         uint16_t add = 0;
         for(int i = 0; i < 9; i++){
           //Serial.printf("%d\n",pp[i]);
@@ -192,7 +208,8 @@ static esp_err_t capture_handler(httpd_req_t *req){
         }
         for(int i = 0; i < 9; i++){
           //Serial.printf("%d\n",add);
-          sprintf(percentage[i],"%.1d%%",pp[i]*100/(fb->len/2));
+          sent_pp[i] = pp[i]*100/(fb->len/18);
+          sprintf(percentage[i],"%.1d%%",pp[i]*100/(fb->len/18));
           //Serial.printf("%s\n",percentage[i]);
         }
         //!add row line
@@ -216,22 +233,15 @@ static esp_err_t capture_handler(httpd_req_t *req){
         uint8_t * buf = NULL;
         size_t buf_len = 0;
         jpg_chunking_t jchunk = {req, 0};
-        //res = frame2jpg_cb(fb, 80, jpg_encode_stream, &jchunk)?ESP_OK:ESP_FAIL;
-        //res = frame2jpg(fb, 80, (const char *)fb->buf, fb->len)?ESP_OK:ESP_FAIL;
-        //bool jpeg_converted = frame2jpg(fb, 80, &buf, &buf_len);
         bool jpeg_converted = fmt2jpg(fb->buf, fb->len, fb->width, fb->height, fb->format, 80, &buf, &buf_len);
-        //httpd_resp_send_chunk(req, NULL, 0);
         res = httpd_resp_send(req, (const char *)buf, buf_len);
-        //fb_len = jchunk.len;
     }
     esp_camera_fb_return(fb);
     int64_t fr_end = esp_timer_get_time();
     //Serial.printf("JPG: %uB %ums", (uint32_t)(fb_len), (uint32_t)((fr_end - fr_start)/1000));
     return res;
 }
-//#include "esp_camera.h"
-//#include "esp_http_server.h"
-//#include "esp_timer.h"
+
 #else
 static esp_err_t capture_handler(httpd_req_t *req){
     camera_fb_t * fb = NULL;
@@ -300,6 +310,7 @@ static esp_err_t stream_handler(httpd_req_t *req){
           //Serial.printf("%d = %x\n",i, fb->buf[2*i]<<8|fb->buf[2*i+1]);
           //Serial.printf("%d = %x\n",i, fb->buf[2*i]<<8|fb->buf[2*i+1]);
           color = fb->buf[2*i]<<8|fb->buf[2*i+1];
+          #if 0
           if(color > 48000)
           {
             //if(i/fb->width)
@@ -310,6 +321,15 @@ static esp_err_t stream_handler(httpd_req_t *req){
              //Serial.printf("%d\n",quadrant);
              pp[quadrant]++;
           }
+        #else
+          if(ColorComp(color,41261,80)){
+            h = i/fb->width;
+            l = i%fb->width;
+           quadrant = h/40 * 3 + l/53;
+           if(quadrant > 8)quadrant = 8;
+           pp[quadrant]++;
+         }
+         #endif
         }
         uint16_t add = 0;
         for(int i = 0; i < 9; i++){
@@ -320,7 +340,8 @@ static esp_err_t stream_handler(httpd_req_t *req){
         //Serial.printf("%d\n",add);
         for(int i = 0; i < 9; i++){
          // Serial.printf("%d\n",add);
-          sprintf(percentage[i],"%d%%",pp[i]*100/(fb->len/2));
+          sent_pp[i] = pp[i]*100/(fb->len/18);
+          sprintf(percentage[i],"%d%%",pp[i]*100/(fb->len/18));
           //Serial.printf("%s\n",percentage[i]);
         }
                 for(int h = 0; h < 320; h++){
