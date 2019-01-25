@@ -212,11 +212,16 @@ void I2C::slave_task(void* arg)
         for (i = 0; i < 9; i++) {
             data[i] = sent_pp[i];
         }
+        for (i = 9; i < 29; i++) {
+            data[i] = sent_e_pp[i - 9];
+        }
+        // printf("----TASK[%d] Slave read: [%d] bytes ----\n", task_idx, size);
+         disp_buf(data, 29);
         //sent_pp[i] = pp[i]*100/(fb->len/18);
         xSemaphoreTake(print_mux, portMAX_DELAY);
         //i2c_reset_tx_fifo(I2C_EXAMPLE_SLAVE_NUM);
         //i2c_reset_rx_fifo(I2C_EXAMPLE_SLAVE_NUM);
-        size_t d_size = i2c_slave_write_buffer(I2C_EXAMPLE_SLAVE_NUM, data, 9, 1 / portTICK_RATE_MS);
+        size_t d_size = i2c_slave_write_buffer(I2C_EXAMPLE_SLAVE_NUM, data, 29, 1 / portTICK_RATE_MS);
        //size_t d_size;
         if (d_size == 0) {
             printf("i2c slave tx buffer full\n");

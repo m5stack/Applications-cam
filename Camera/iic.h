@@ -3,6 +3,7 @@
 #include <driver\i2c.h>
 
 extern uint8_t  sent_pp[9];
+extern uint8_t sent_e_pp[20];
 
 #define DATA_LENGTH                        512              /*!<Data buffer length for test buffer*/
 #define RW_TEST_LENGTH                     129              /*!<Data length for r/w test, any value from 0-DATA_LENGTH*/

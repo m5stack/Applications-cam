@@ -20,6 +20,7 @@
 #include "ASC16.h"
 int pp[9];
 uint8_t  sent_pp[9];
+uint8_t  sent_e_pp[20];
 char percentage[9][9];
 typedef struct {
         size_t size; //number of values used for filtering
@@ -174,6 +175,12 @@ static esp_err_t capture_handler(httpd_req_t *req){
           //！%
           pp[i] = 0;
         }
+        //！ 1
+        for(int i = 0; i < 20; i++){
+          //！%
+          sent_e_pp[i] = 0;
+        }
+        
         uint16_t color = 0;
         int temp_avr = 0;
         for(int i = 0; i < fb->len/2; i++){
@@ -197,6 +204,8 @@ static esp_err_t capture_handler(httpd_req_t *req){
            quadrant = h/40 * 3 + l/53;
            if(quadrant > 8)quadrant = 8;
            pp[quadrant]++;
+
+           sent_e_pp[l/8]++;
          }
          #endif
         }
@@ -305,6 +314,11 @@ static esp_err_t stream_handler(httpd_req_t *req){
         int quadrant = 0;
         for(int i = 0; i < 9; i++)
         pp[i] = 0;
+        //！ 1
+        for(int i = 0; i < 20; i++){
+          //！%
+          sent_e_pp[i] = 0;
+        }
         uint16_t color = 0;
         for(int i = 0; i < fb->len/2; i++){
           //Serial.printf("%d = %x\n",i, fb->buf[2*i]<<8|fb->buf[2*i+1]);
@@ -328,6 +342,8 @@ static esp_err_t stream_handler(httpd_req_t *req){
            quadrant = h/40 * 3 + l/53;
            if(quadrant > 8)quadrant = 8;
            pp[quadrant]++;
+
+           sent_e_pp[l/8]++;
          }
          #endif
         }

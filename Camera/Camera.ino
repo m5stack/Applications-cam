@@ -2,7 +2,10 @@
 #include <WiFi.h>
 #include"iic.h"
 I2C i2c;
-
+extern int pp[9];
+extern uint8_t  sent_pp[9];
+extern uint8_t  sent_e_pp[20];
+extern char percentage[9][9];
 /*
 typedef enum {
     PIXFORMAT_RGB565,    // 2BPP/RGB565
@@ -99,7 +102,7 @@ typedef enum {
 #endif
 
 void startCameraServer();
-
+bool ColorComp(uint16_t pixel_color,uint16_t template_color,uint16_t threshold);
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
@@ -189,6 +192,131 @@ void setup() {
   i2c.slave_start();
 
 }
-void loop() {
 
+esp_err_t get_stream(void){
+    camera_fb_t * fb = NULL;
+    esp_err_t res = ESP_OK;
+    size_t _jpg_buf_len = 0;
+    uint8_t * _jpg_buf = NULL;
+    char * part_buf[64];
+
+    static int64_t last_frame = 0;
+    if(!last_frame) {
+        last_frame = esp_timer_get_time();
+    }
+
+
+    while(true){
+        fb = esp_camera_fb_get();
+        if (!fb) {
+            Serial.printf("Camera capture failed");
+            res = ESP_FAIL;
+        } else {
+            if(fb->format != PIXFORMAT_JPEG)
+            {
+       int h = 0; 
+        int l = 0;
+        int quadrant = 0;
+        for(int i = 0; i < 9; i++)
+        pp[i] = 0;
+        //！ 1
+        for(int i = 0; i < 20; i++){
+          //！%
+          sent_e_pp[i] = 0;
+        }
+        uint16_t color = 0;
+        for(int i = 0; i < fb->len/2; i++){
+          //Serial.printf("%d = %x\n",i, fb->buf[2*i]<<8|fb->buf[2*i+1]);
+          //Serial.printf("%d = %x\n",i, fb->buf[2*i]<<8|fb->buf[2*i+1]);
+          color = fb->buf[2*i]<<8|fb->buf[2*i+1];
+          #if 0
+          if(color > 48000)
+          {
+            //if(i/fb->width)
+             h = i/fb->width;
+             l = i%fb->width;
+             quadrant = h/40 * 3 + l/53;
+             if(quadrant > 8)quadrant = 8;
+             //Serial.printf("%d\n",quadrant);
+             pp[quadrant]++;
+          }
+        #else
+          if(ColorComp(color,41261,80)){
+            h = i/fb->width;
+            l = i%fb->width;
+           quadrant = h/40 * 3 + l/53;
+           if(quadrant > 8)quadrant = 8;
+           pp[quadrant]++;
+
+           sent_e_pp[l/8]++;
+         }
+         #endif
+        }
+        uint16_t add = 0;
+        for(int i = 0; i < 9; i++){
+          //Serial.printf("%d = %d\n",i,pp[i]);
+          add += pp[i];
+        }
+ 
+        //Serial.printf("%d\n",add);
+        for(int i = 0; i < 9; i++){
+         // Serial.printf("%d\n",add);
+          sent_pp[i] = pp[i]*100/(fb->len/18);
+          sprintf(percentage[i],"%d%%",pp[i]*100/(fb->len/18));
+          //Serial.printf("%s\n",percentage[i]);
+        }
+                for(int h = 0; h < 320; h++){
+                  fb->buf[40 * 320 + h] = 0;
+                  fb->buf[80 * 320 + h] = 0;
+                }
+                for(int w = 0; w < 120; w++){
+                  fb->buf[53*2 + 320*w] = 0;
+                  fb->buf[53*2*2 + 320*w] = 0;
+                }
+             
+                bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
+                esp_camera_fb_return(fb);
+                fb = NULL;
+                if(!jpeg_converted){
+                    Serial.printf("JPEG compression failed");
+                    res = ESP_FAIL;
+                }
+            } else {
+                _jpg_buf_len = fb->len;
+                _jpg_buf = fb->buf;
+            }
+        }
+       
+        if(fb){
+            esp_camera_fb_return(fb);
+            fb = NULL;
+            _jpg_buf = NULL;
+        } else if(_jpg_buf){
+            free(_jpg_buf);
+            _jpg_buf = NULL;
+        }
+        if(res != ESP_OK){
+            break;
+        }
+        int64_t fr_end = esp_timer_get_time();
+
+        int64_t frame_time = fr_end - last_frame;
+        last_frame = fr_end;
+        frame_time /= 1000;
+       // uint32_t avg_frame_time = ra_filter_run(&ra_filter, frame_time);
+       /*
+        Serial.printf("MJPG: %uB %ums (%.1ffps), AVG: %ums (%.1ffps)"
+            ,(uint32_t)(_jpg_buf_len),
+            (uint32_t)frame_time, 1000.0 / (uint32_t)frame_time,
+            avg_frame_time, 1000.0 / avg_frame_time
+           
+        ); 
+       */
+    }
+
+    last_frame = 0;
+    return res;
+}
+void loop() {
+  get_stream();
 }
