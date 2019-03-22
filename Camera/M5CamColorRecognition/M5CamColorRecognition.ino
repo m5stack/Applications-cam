@@ -1,16 +1,10 @@
 #include "esp_camera.h"
 #include <WiFi.h>
-#include"iic.h"
-I2C i2c;
-extern int pp[9];
-extern uint8_t  sent_pp[9];
-extern uint8_t  sent_e_pp[20];
-extern char percentage[9][9];
 /*
 typedef enum {
     PIXFORMAT_RGB565,    // 2BPP/RGB565
     PIXFORMAT_YUV422,    // 2BPP/YUV422
-     , // 1BPP/GRAYSCALE
+    PIXFORMAT_GRAYSCALE, // 1BPP/GRAYSCALE
     PIXFORMAT_JPEG,      // JPEG/COMPRESSED
     PIXFORMAT_RGB888,    // 3BPP/RGB888
 } pixformat_t;
@@ -36,8 +30,11 @@ typedef enum {
 
 // Select camera model
 //#define CAMERA_MODEL_WROVER_KIT
-#define CAMERA_MODEL_M5STACK_PSRAM
+#define CAMERA_A_MODEL_M5STACK_PSRAM
 //#define CAMERA_MODEL_AI_THINKER
+
+const char* ssid = "M5";
+const char* password = "12345678";
 
 
 #if defined(CAMERA_MODEL_WROVER_KIT)
@@ -59,11 +56,14 @@ typedef enum {
 #define HREF_GPIO_NUM    23
 #define PCLK_GPIO_NUM    22
 
-#elif defined(CAMERA_MODEL_M5STACK_PSRAM)
+/*
+  For M5Camera A Model https://docs.m5stack.com/#/en/unit/m5camera
+*/
+#elif defined(CAMERA_A_MODEL_M5STACK_PSRAM)
 #define PWDN_GPIO_NUM     -1
 #define RESET_GPIO_NUM    15
 #define XCLK_GPIO_NUM     27
-#define SIOD_GPIO_NUM     22
+#define SIOD_GPIO_NUM     25
 #define SIOC_GPIO_NUM     23
 
 #define Y9_GPIO_NUM       19
@@ -74,7 +74,7 @@ typedef enum {
 #define Y4_GPIO_NUM       34
 #define Y3_GPIO_NUM       35
 #define Y2_GPIO_NUM       32
-#define VSYNC_GPIO_NUM    25
+#define VSYNC_GPIO_NUM    22
 #define HREF_GPIO_NUM     26
 #define PCLK_GPIO_NUM     21
 
@@ -102,7 +102,7 @@ typedef enum {
 #endif
 
 void startCameraServer();
-bool ColorComp(uint16_t pixel_color,uint16_t template_color,uint16_t threshold);
+
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
@@ -137,7 +137,6 @@ void setup() {
   config.frame_size = FRAMESIZE_QQVGA;
   config.jpeg_quality = 0;
   config.fb_count = 10;
-  //config.wb_mode = 1;//0 - 4
 
   // camera init
   esp_err_t err = esp_camera_init(&config);
@@ -149,7 +148,6 @@ void setup() {
   //drop down frame size for higher initial frame rate
   sensor_t * s = esp_camera_sensor_get();
   s->set_framesize(s, FRAMESIZE_QQVGA);
-  s->set_wb_mode(s, 4);
   //Serial.println("ok");
 
 #if 1
@@ -157,7 +155,7 @@ void setup() {
   // You can remove the password parameter if you want the AP to be open.
   WiFi.mode(WIFI_AP);
   String Mac = WiFi.macAddress();
-  String SSID = "Camera:"+ Mac;
+  String SSID = "LidarBot:"+ Mac;
   bool result = WiFi.softAP(SSID.c_str(), "12345678", 0, 0);
   if (!result){
     Serial.println("AP Config failed.");
@@ -189,134 +187,56 @@ void setup() {
   Serial.println("' to connect");
   #endif
 
-  i2c.slave_start();
+
 
 }
-
-esp_err_t get_stream(void){
-    camera_fb_t * fb = NULL;
-    esp_err_t res = ESP_OK;
-    size_t _jpg_buf_len = 0;
-    uint8_t * _jpg_buf = NULL;
-    char * part_buf[64];
-
-    static int64_t last_frame = 0;
-    if(!last_frame) {
-        last_frame = esp_timer_get_time();
-    }
-
-
-    while(true){
-        fb = esp_camera_fb_get();
-        if (!fb) {
-            Serial.printf("Camera capture failed");
-            res = ESP_FAIL;
-        } else {
-            if(fb->format != PIXFORMAT_JPEG)
-            {
-       int h = 0; 
-        int l = 0;
-        int quadrant = 0;
-        for(int i = 0; i < 9; i++)
-        pp[i] = 0;
-        //！ 1
-        for(int i = 0; i < 20; i++){
-          //！%
-          sent_e_pp[i] = 0;
-        }
-        uint16_t color = 0;
-        for(int i = 0; i < fb->len/2; i++){
-          //Serial.printf("%d = %x\n",i, fb->buf[2*i]<<8|fb->buf[2*i+1]);
-          //Serial.printf("%d = %x\n",i, fb->buf[2*i]<<8|fb->buf[2*i+1]);
-          color = fb->buf[2*i]<<8|fb->buf[2*i+1];
+uint8_t ImageData[9][80][107];
+void loop() {
+ /*
+ // put your main code here, to run repeatedly:
+  camera_fb_t * fb = NULL;
+  char tx_buffer[200] = { '\0' };
+  tx_buffer[0] = 0xFF;
+  tx_buffer[1] = 0xD8;
+  tx_buffer[2] = 0xEA;
+  tx_buffer[3] = 0x01;
+  while(true){
+       // Serial.println("ok");
+        camera_fb_t * fb = esp_camera_fb_get();
+        if(!fb) {
+          Serial.printf("Camera capture failed");
+        }else{
+          Serial.printf("fb->len = %d\n", fb->len);
+          Serial.printf("fb->width = %d\n", fb->width);
+          Serial.printf("fb->height = %d\n", fb->height);
+          Serial.printf("fb->format = %d\n", fb->format);
+          tx_buffer[4] = (uint8_t)((fb->len & 0xFF0000) >> 16) ;
+          tx_buffer[5] = (uint8_t)((fb->len & 0x00FF00) >> 8 ) ;
+          tx_buffer[6] = (uint8_t)((fb->len & 0x0000FF) >> 0 );
+          //320x240
+          //uart_write_bytes(UART_NUM_1, (char *)tx_buffer, 7);
+          //uart_write_bytes(UART_NUM_1, (char *)fb->buf, fb->len);
+          //strcat((char *)tx_buffer,(char *)fb->buf);
+          //Serial.write((uint8_t *)tx_buffer,fb->len + 7);
           #if 0
-          if(color > 48000)
-          {
-            //if(i/fb->width)
-             h = i/fb->width;
-             l = i%fb->width;
-             quadrant = h/40 * 3 + l/53;
-             if(quadrant > 8)quadrant = 8;
-             //Serial.printf("%d\n",quadrant);
-             pp[quadrant]++;
-          }
-        #else
-          if(ColorComp(color,41261,80)){
-            h = i/fb->width;
-            l = i%fb->width;
-           quadrant = h/40 * 3 + l/53;
-           if(quadrant > 8)quadrant = 8;
-           pp[quadrant]++;
-
-           sent_e_pp[l/8]++;
-         }
+          for(int z = 0; z < 9; z++)
+            for(int i = 0; i < 80; i++)
+              for(int j = 0;j  < 107;j++)
+                ImageData[z][i][j] = fb->buf
          #endif
         }
-        uint16_t add = 0;
-        for(int i = 0; i < 9; i++){
-          //Serial.printf("%d = %d\n",i,pp[i]);
-          add += pp[i];
-        }
- 
-        //Serial.printf("%d\n",add);
-        for(int i = 0; i < 9; i++){
-         // Serial.printf("%d\n",add);
-          sent_pp[i] = pp[i]*100/(fb->len/18);
-          sprintf(percentage[i],"%d%%",pp[i]*100/(fb->len/18));
-          //Serial.printf("%s\n",percentage[i]);
-        }
-                for(int h = 0; h < 320; h++){
-                  fb->buf[40 * 320 + h] = 0;
-                  fb->buf[80 * 320 + h] = 0;
-                }
-                for(int w = 0; w < 120; w++){
-                  fb->buf[53*2 + 320*w] = 0;
-                  fb->buf[53*2*2 + 320*w] = 0;
-                }
-             
-                bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
-                esp_camera_fb_return(fb);
-                fb = NULL;
-                if(!jpeg_converted){
-                    Serial.printf("JPEG compression failed");
-                    res = ESP_FAIL;
-                }
-            } else {
-                _jpg_buf_len = fb->len;
-                _jpg_buf = fb->buf;
-            }
-        }
-       
-        if(fb){
-            esp_camera_fb_return(fb);
-            fb = NULL;
-            _jpg_buf = NULL;
-        } else if(_jpg_buf){
-            free(_jpg_buf);
-            _jpg_buf = NULL;
-        }
-        if(res != ESP_OK){
-            break;
-        }
-        int64_t fr_end = esp_timer_get_time();
+        //Serial.printf("fb->len = %d\n", fb->len);
 
-        int64_t frame_time = fr_end - last_frame;
-        last_frame = fr_end;
-        frame_time /= 1000;
-       // uint32_t avg_frame_time = ra_filter_run(&ra_filter, frame_time);
-       /*
-        Serial.printf("MJPG: %uB %ums (%.1ffps), AVG: %ums (%.1ffps)"
-            ,(uint32_t)(_jpg_buf_len),
-            (uint32_t)frame_time, 1000.0 / (uint32_t)frame_time,
-            avg_frame_time, 1000.0 / avg_frame_time
-           
-        ); 
-       */
+        tx_buffer[4] = (uint8_t)((fb->len & 0xFF0000) >> 16) ;
+        tx_buffer[5] = (uint8_t)((fb->len & 0x00FF00) >> 8 ) ;
+        e[6] = (uint8_t)((fb->len & 0x0000FF) >> 0 );
+
+        uart_write_bytes(UART_NUM_1, (char *)tx_buffer, 7);
+        uart_write_bytes(UART_NUM_1, (char *)fb->buf, fb->len);
+        data_len =(uint32_t)(tx_buffer[4] << 16) | (tx_buffer[5] << 8) | tx_buffer[6];
+        printf("should %d, print a image, len: %d\r\n",fb->len, data_len);
+
+        esp_camera_fb_return(fb);
     }
-
-    last_frame = 0;
-    return res;
-}
-void loop() {
-  get_stream();
+*/
 }
